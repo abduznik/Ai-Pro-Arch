@@ -44,13 +44,27 @@ function ai-pro-arch {
     }
     elseif ($Mode -eq "Fix") {
         # Fix Mode: Patching
-        # Goal: Get the corrected file content only
-        if (Test-Path $File) {
-            $content = Get-Content $File -Raw
-        } else {
-            Write-Host "Error: File '$File' not found." -ForegroundColor Red
-            return
+        
+        # Fuzzy Search for File if not found directly
+        if (-not (Test-Path $File)) {
+            Write-Host "File '$File' not found directly. Searching..." -ForegroundColor Yellow
+            $foundFiles = Get-ChildItem -Path . -Filter $File -Recurse -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            
+            if ($foundFiles.Count -eq 1) {
+                $File = $foundFiles[0]
+                Write-Host "-> Auto-detected file: $File" -ForegroundColor Cyan
+            } elseif ($foundFiles.Count -gt 1) {
+                Write-Host "Error: Multiple files found matching '$File'. Please be more specific:" -ForegroundColor Red
+                $foundFiles | ForEach-Object { Write-Host " - $_" -ForegroundColor Gray }
+                return
+            } else {
+                 Write-Host "Error: File '$File' not found in the current directory." -ForegroundColor Red
+                 return
+            }
         }
+
+        # Goal: Get the corrected file content only
+        $content = Get-Content $File -Raw
         $template = 'Task: Fix Code. Issue: "{0}". File Content: "{1}". Return ONLY the corrected complete file content. Ensure it is ready to be written to disk. Do NOT use markdown blocks.'
         $prompt = $template -f $Input, $content
     }
