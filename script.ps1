@@ -135,17 +135,24 @@ Goal: Return ONLY the complete, corrected file content based on the User Instruc
         while ($retryCount -le $maxRetries) {
             Write-Host "   -> Attempting with model: $model (Try $($retryCount + 1))..." -ForegroundColor DarkGray
             
+            # ROBUST INPUT: Pass large/complex prompts via Env Var to avoid shell quoting issues
+            $env:GEMINI_PROMPT = $prompt
+
             try {
                 # Compatibility: Check for Docker shim path first, then global path
                 if (Test-Path "/usr/local/bin/gemini") {
-                    $currentRun = & /usr/local/bin/gemini $prompt --model $model 2>&1 | Out-String
+                    # Call without prompt arg, shim reads Env Var
+                    $currentRun = & /usr/local/bin/gemini --model $model 2>&1 | Out-String
                 } else {
-                    $currentRun = & gemini $prompt --model $model 2>&1 | Out-String
+                    $currentRun = & gemini --model $model 2>&1 | Out-String
                 }
             } catch {
                 $currentRun = "Error: " + $_.Exception.Message
             }
-
+            
+            # Cleanup Env Var
+            $env:GEMINI_PROMPT = $null
+            
             # Cleanup Warnings (Shim specific)
             if ($currentRun -match "Both GOOGLE_API_KEY and GEMINI_API_KEY are set") {
                 $currentRun = $currentRun -replace "Both GOOGLE_API_KEY and GEMINI_API_KEY are set\. Using GOOGLE_API_KEY\.", ""
