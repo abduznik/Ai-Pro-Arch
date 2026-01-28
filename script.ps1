@@ -99,7 +99,20 @@ function ai-pro-arch {
 
         # Goal: Get the corrected file content only
         $content = Get-Content $File -Raw
-        $template = 'Task: Fix Code. Issue: "{0}". File Content: "{1}". Return ONLY the corrected complete file content. Ensure it is ready to be written to disk. Do NOT use markdown blocks.'
+        $template = @"
+Task: Fix/Modify Code.
+User Instructions:
+'''
+{0}
+'''
+
+Target File Content:
+'''
+{1}
+'''
+
+Goal: Return ONLY the complete, corrected file content based on the User Instructions. Do not use markdown blocks.
+"@
         $prompt = $template -f $Input, $content
     }
     elseif ($Mode -eq "Explain") {
@@ -114,58 +127,63 @@ function ai-pro-arch {
     $success = $false
 
     foreach ($model in $ModelList) {
-        Write-Host "   -> Attempting with model: $model..." -ForegroundColor DarkGray
+        $retryCount = 0
+        $maxRetries = 1 # Retry once for 503s
         
-        try {
-            # Compatibility: Check for Docker shim path first, then global path
-            if (Test-Path "/usr/local/bin/gemini") {
-                $currentRun = & /usr/local/bin/gemini $prompt --model $model 2>&1 | Out-String
-            } else {
-                $currentRun = & gemini $prompt --model $model 2>&1 | Out-String
+        while ($retryCount -le $maxRetries) {
+            Write-Host "   -> Attempting with model: $model (Try $($retryCount + 1))..." -ForegroundColor DarkGray
+            
+            try {
+                # Compatibility: Check for Docker shim path first, then global path
+                if (Test-Path "/usr/local/bin/gemini") {
+                    $currentRun = & /usr/local/bin/gemini $prompt --model $model 2>&1 | Out-String
+                } else {
+                    $currentRun = & gemini $prompt --model $model 2>&1 | Out-String
+                }
+            } catch {
+                $currentRun = "Error: " + $_.Exception.Message
             }
-        } catch {
-            $currentRun = "Error: " + $_.Exception.Message
-        }
 
-        # Cleanup Warnings (Shim specific)
-        if ($currentRun -match "Both GOOGLE_API_KEY and GEMINI_API_KEY are set") {
-            $currentRun = $currentRun -replace "Both GOOGLE_API_KEY and GEMINI_API_KEY are set\. Using GOOGLE_API_KEY\.", ""
-        }
-        $currentRun = $currentRun.Trim()
-
-        # Check for Errors
-        if ($currentRun -match "429" -or $currentRun -match "exhausted" -or $currentRun -match "Quota") {
-            Write-Host "      [!] Quota hit on $model. Pausing 3s..." -ForegroundColor Yellow
-            Start-Sleep -Seconds 3
-            continue
-        } elseif ($currentRun -match "Error:" -or $currentRun -match "Exception") {
-            Write-Host "      [DEBUG] $currentRun" -ForegroundColor Red
-            Write-Host "      [!] Generic error on $model. Switching..." -ForegroundColor Yellow
-            Start-Sleep -Seconds 1
-            continue
-        }
-
-        # Success Validation based on Mode
-        if ($Mode -eq "Init") {
-            # We need JSON
-            if ($currentRun -match "\{.*\}") {
-                $aiOutput = $currentRun
-                $success = $true
-                break
+            # Cleanup Warnings (Shim specific)
+            if ($currentRun -match "Both GOOGLE_API_KEY and GEMINI_API_KEY are set") {
+                $currentRun = $currentRun -replace "Both GOOGLE_API_KEY and GEMINI_API_KEY are set\. Using GOOGLE_API_KEY\.", ""
             }
-        } else {
-            # Fix/Explain validation
-            # CRITICAL: Ensure it's not an API error message
-            if ($currentRun -match "^Error" -or $currentRun -match "503" -or $currentRun -match "UNAVAILABLE" -or $currentRun -match "overloaded") {
-                Write-Host "      [!] Model returned error content. Skipping..." -ForegroundColor Yellow
+            $currentRun = $currentRun.Trim()
+
+            # 503 / Overloaded Check
+            if ($currentRun -match "503" -or $currentRun -match "overloaded" -or $currentRun -match "UNAVAILABLE") {
+                Write-Host "      [!] Model Overloaded (503). Waiting 2s..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 2
+                $retryCount++
+                if ($retryCount -gt $maxRetries) {
+                     Write-Host "      [!] Max retries reached for $model. Skipping." -ForegroundColor Red
+                }
                 continue
             }
-
-            if (-not [string]::IsNullOrWhiteSpace($currentRun)) {
-                $aiOutput = $currentRun
-                $success = $true
-                break
+            
+            # Generic Error Check
+            if ($currentRun -match "^Error") {
+                Write-Host "      [!] API Error: $currentRun. Skipping model." -ForegroundColor Red
+                break # Break inner while, go to next model
             }
+
+            # Success Validation based on Mode
+            if ($Mode -eq "Init") {
+                if ($currentRun -match "\{.*\}") {
+                    $aiOutput = $currentRun
+                    $success = $true
+                    break 2 # Break both loops
+                }
+            } else {
+                if (-not [string]::IsNullOrWhiteSpace($currentRun)) {
+                    $aiOutput = $currentRun
+                    $success = $true
+                    break 2 # Break both loops
+                }
+            }
+            
+            # If we got here, output was empty or invalid but not an error?
+            break 
         }
     }
 
