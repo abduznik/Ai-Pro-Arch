@@ -99,21 +99,23 @@ function ai-pro-arch {
 
         # Goal: Get the corrected file content only
         $content = Get-Content $File -Raw
-        $template = @"
+        
+        # SAFE TEMPLATE: Use Replace() instead of -f to avoid crashing on '{' or '}' in code
+        $prompt = @"
 Task: Fix/Modify Code.
 User Instructions:
 '''
-{0}
+{{USER_INPUT}}
 '''
 
 Target File Content:
 '''
-{1}
+{{FILE_CONTENT}}
 '''
 
 Goal: Return ONLY the complete, corrected file content based on the User Instructions. Do not use markdown blocks.
 "@
-        $prompt = $template -f $Input, $content
+        $prompt = $prompt.Replace("{{USER_INPUT}}", $Input).Replace("{{FILE_CONTENT}}", $content)
     }
     elseif ($Mode -eq "Explain") {
         # Explain Mode: Explanation
