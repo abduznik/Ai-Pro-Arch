@@ -154,7 +154,13 @@ function ai-pro-arch {
                 break
             }
         } else {
-            # Fix/Explain just need text
+            # Fix/Explain validation
+            # CRITICAL: Ensure it's not an API error message
+            if ($currentRun -match "^Error" -or $currentRun -match "503" -or $currentRun -match "UNAVAILABLE" -or $currentRun -match "overloaded") {
+                Write-Host "      [!] Model returned error content. Skipping..." -ForegroundColor Yellow
+                continue
+            }
+
             if (-not [string]::IsNullOrWhiteSpace($currentRun)) {
                 $aiOutput = $currentRun
                 $success = $true
@@ -164,7 +170,7 @@ function ai-pro-arch {
     }
 
     if (-not $success) {
-        Write-Host "!! Error: All AI models failed to generate a response." -ForegroundColor Red
+        Write-Host "!! Error: All AI models failed to generate a valid response." -ForegroundColor Red
         return
     }
 
